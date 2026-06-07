@@ -84,7 +84,7 @@
             x: step.x * cellSize + cellSize / 2,
             y: step.y * cellSize + cellSize / 2 - cellSize * 0.3,
             radius: 10,
-            fill: '#18a058',
+            fill: stepNodeColor,
             stroke: '#fff',
             strokeWidth: 2,
           }"
@@ -129,6 +129,8 @@ const {
   maxHeatValue,
   showHeatmap,
   insufficientStockChars,
+  missingChars,
+  canCompletePick,
   moveCharacter
 } = storeToRefs(store)
 
@@ -214,16 +216,21 @@ const pathLineConfig = computed(() => {
     points.push(step.x * cellSize.value + cellSize.value / 2)
     points.push(step.y * cellSize.value + cellSize.value / 2)
   })
+  const strokeColor = canCompletePick.value ? '#18a058' : '#f0a020'
   return {
     points,
-    stroke: '#18a058',
+    stroke: strokeColor,
     strokeWidth: 2,
     lineCap: 'round',
     lineJoin: 'round',
-    dash: [8, 4],
-    opacity: 0.7,
+    dash: canCompletePick.value ? [8, 4] : [4, 4],
+    opacity: canCompletePick.value ? 0.7 : 0.5,
     listening: false,
   }
+})
+
+const stepNodeColor = computed(() => {
+  return canCompletePick.value ? '#18a058' : '#f0a020'
 })
 
 let dragStartChar: TypeChar | null = null

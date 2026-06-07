@@ -1,5 +1,27 @@
 <template>
   <div class="control-panel">
+    <n-alert
+      v-if="!canCompletePick && inputText.trim().length > 0"
+      :type="alertType"
+      :title="alertTitle"
+      show-icon
+      style="margin-bottom: 16px"
+    >
+      <template #default>
+      <div class="alert-detail">
+        <div v-if="missingChars.length > 0" class="alert-line">
+          <span>· 缺失 {{ missingChars.length }} 个字符：</span>
+          <span class="alert-chars">
+            {{ missingChars.map(c => c.char).join('、') }}
+          </span>
+        </div>
+        <div v-if="insufficientStockChars.length > 0" class="alert-line">
+          <span>· 库存不足 {{ insufficientStockChars.length }} 项</span>
+        </div>
+      </div>
+      </template>
+    </n-alert>
+
     <n-card title="字盘设置" :bordered="false" size="small">
       <n-space vertical :size="12">
         <n-form-item label="列数">
@@ -41,27 +63,57 @@
           :rows="4"
           @update:value="handleTextChange"
         />
-        <n-space>
-          <n-switch v-model:value="showPath">
-            <template #checked>显示路径</template>
-            <template #unchecked>隐藏路径</template>
-          </n-switch>
-          <n-switch v-model:value="showHeatmap">
-            <template #checked>热力图</template>
-            <template #unchecked>无热力</template>
-          </n-switch>
+        <n-space vertical :size="8">
+          <n-space>
+            <n-switch v-model:value="showPath">
+              <template #checked>显示路径</template>
+              <template #unchecked>隐藏路径</template>
+            </n-switch>
+            <n-switch v-model:value="showHeatmap">
+              <template #checked>热力图</template>
+              <template #unchecked>无热力</template>
+            </n-switch>
+          </n-space>
+          <n-space>
+            <n-switch v-model:value="optimizePath">
+              <template #checked>路径优化</template>
+              <template #unchecked>按原文顺序</template>
+            </n-switch>
+            <n-tag v-if="optimizePath && savedDistancePercent > 0" type="success" size="small">
+              节省 {{ savedDistancePercent }}%
+            </n-tag>
+          </n-space>
         </n-space>
       </n-space>
     </n-card>
 
     <n-card title="统计信息" :bordered="false" size="small" style="margin-top: 16px">
-      <n-statistic label="总移动距离 (格)" :value="totalDistance" :precision="2" />
+      <n-statistic label="总移动距离 (格)" :value="totalDistance" :precision="2">
+        <template #suffix>
+          <n-tag v-if="optimizePath && savedDistancePercent > 0" type="success" size="small">
+            优化后
+          </n-tag>
+        </template>
+      </n-statistic>
+      <n-statistic
+        v-if="optimizePath && originalDistance !== totalDistance"
+        label="原顺序距离"
+        :value="originalDistance"
+        :precision="2"
+        style="margin-top: 8px; font-size: 12px"
+      >
+        <template #label>
+          <span style="color: #999; font-size: 12px">原顺序距离 (格)</span>
+        </template>
+      </n-statistic>
       <n-divider style="margin: 12px 0" />
       <n-statistic label="字符总数" :value="totalChars" />
       <n-statistic label="可用字符" :value="availableCharsCount" style="margin-top: 8px" />
-      <n-statistic label="缺失字符" :value="missingChars.length" style="margin-top: 8px; --n-value-color: '#d03050'">
-        <template #suffix>
-          <n-tag v-if="missingChars.length > 0" type="error" size="small">缺字</n-tag>
+      <n-statistic label="缺失字符" :value="missingChars.length" style="margin-top: 8px">
+        <template #value>
+          <span :class="{ 'text-error': missingChars.length > 0 }">
+            {{ missingChars.length }}
+          </span>
         </template>
       </n-statistic>
     </n-card>
@@ -129,7 +181,8 @@ import {
   NSwitch,
   NStatistic,
   NDivider,
-  NTag
+  NTag,
+  NAlert
 } from 'naive-ui'
 
 const store = useCompositorStore()
@@ -138,14 +191,18 @@ const {
   inputText,
   showPath,
   showHeatmap,
+  optimizePath,
   missingChars,
   availableCharCounts,
   insufficientStockChars,
   totalDistance,
-  charCounts
+  originalDistance,
+  savedDistancePercent,
+  charCounts,
+  canCompletePick
 } = storeToRefs(store)
 
-const { setGridConfig, setInputText, togglePath: togglePathFn, toggleHeatmap: toggleHeatmapFn } = store
+const { setGridConfig, setInputText, toggleOptimizePath } = store
 
 const totalChars = computed(() => {
   return charCounts.value.reduce((sum, c) => sum + c.count, 0)
@@ -158,6 +215,21 @@ const availableCharsCount = computed(() => {
 const maxFreqCount = computed(() => {
   if (availableCharCounts.value.length === 0) return 1
   return availableCharCounts.value[0].count
+})
+
+const alertType = computed(() => {
+  if (missingChars.value.length > 0) return 'error'
+  return 'warning'
+})
+
+const alertTitle = computed(() => {
+  if (missingChars.value.length > 0 && insufficientStockChars.value.length > 0) {
+    return '⚠️ 无法完成拣字 - 存在缺字和库存不足'
+  }
+  if (missingChars.value.length > 0) {
+    return '⚠️ 无法完成拣字 - 存在缺失字符'
+  }
+  return '⚠️ 库存不足 - 无法完整拣字'
 })
 
 function handleGridChange(key: 'cols' | 'rows' | 'cellSize', value: number | null) {
@@ -174,6 +246,21 @@ function handleTextChange(value: string) {
 <style scoped>
 .control-panel {
   width: 320px;
+}
+
+.alert-detail {
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.alert-line {
+  margin-bottom: 4px;
+  line-height: 1.6;
+}
+
+.alert-chars {
+  font-weight: 500;
+  letter-spacing: 1px;
 }
 
 .missing-chars,
@@ -222,5 +309,9 @@ function handleTextChange(value: string) {
   text-align: right;
   color: #666;
   font-size: 12px;
+}
+
+.text-error {
+  color: #d03050;
 }
 </style>

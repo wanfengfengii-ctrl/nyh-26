@@ -118,6 +118,7 @@ export const useCompositorStore = defineStore('compositor', () => {
   const inputText = ref('')
   const showHeatmap = ref(false)
   const showPath = ref(true)
+  const optimizePath = ref(true)
 
   const charMap = computed(() => {
     const map = new Map<string, TypeChar>()
@@ -188,7 +189,11 @@ export const useCompositorStore = defineStore('compositor', () => {
     return max || 1
   })
 
-  const pathSteps = computed((): PathStep[] => {
+  const canCompletePick = computed(() => {
+    return missingChars.value.length === 0 && insufficientStockChars.value.length === 0
+  })
+
+  const rawPathSteps = computed((): PathStep[] => {
     const steps: PathStep[] = []
     const text = inputText.value
     let idx = 0
@@ -207,6 +212,47 @@ export const useCompositorStore = defineStore('compositor', () => {
     return steps
   })
 
+  function nearestNeighborOptimize(steps: PathStep[]): PathStep[] {
+    if (steps.length <= 2) return steps
+
+    const remaining = [...steps]
+    const optimized: PathStep[] = []
+    const first = remaining.shift()!
+    optimized.push({ ...first, index: 0 })
+
+    let current = { x: first.x, y: first.y }
+    let newIndex = 1
+
+    while (remaining.length > 0) {
+      let minDist = Infinity
+      let minIdx = -1
+
+      for (let i = 0; i < remaining.length; i++) {
+        const dx = remaining[i].x - current.x
+        const dy = remaining[i].y - current.y
+        const dist = Math.sqrt(dx * dx + dy * dy)
+        if (dist < minDist) {
+          minDist = dist
+          minIdx = i
+        }
+      }
+
+      const next = remaining.splice(minIdx, 1)[0]
+      optimized.push({ ...next, index: newIndex++ })
+      current = { x: next.x, y: next.y }
+    }
+
+    return optimized
+  }
+
+  const pathSteps = computed((): PathStep[] => {
+    const raw = rawPathSteps.value
+    if (optimizePath.value) {
+      return nearestNeighborOptimize(raw)
+    }
+    return raw
+  })
+
   const totalDistance = computed(() => {
     const steps = pathSteps.value
     if (steps.length <= 1) return 0
@@ -217,6 +263,25 @@ export const useCompositorStore = defineStore('compositor', () => {
       dist += Math.sqrt(dx * dx + dy * dy)
     }
     return Math.round(dist * 100) / 100
+  })
+
+  const originalDistance = computed(() => {
+    const steps = rawPathSteps.value
+    if (steps.length <= 1) return 0
+    let dist = 0
+    for (let i = 1; i < steps.length; i++) {
+      const dx = steps[i].x - steps[i - 1].x
+      const dy = steps[i].y - steps[i - 1].y
+      dist += Math.sqrt(dx * dx + dy * dy)
+    }
+    return Math.round(dist * 100) / 100
+  })
+
+  const savedDistancePercent = computed(() => {
+    const orig = originalDistance.value
+    const opt = totalDistance.value
+    if (orig === 0) return 0
+    return Math.round((1 - opt / orig) * 100)
   })
 
   function setGridConfig(config: Partial<GridConfig>) {
@@ -252,13 +317,15 @@ export const useCompositorStore = defineStore('compositor', () => {
     const newX = updates.x ?? current.x
     const newY = updates.y ?? current.y
 
-    if (newX !== current.x || newY !== current.y) {
-      if (usedPositions.value.has(`${newX},${newY}`)) {
-        return { success: false, message: '该位置已被占用' }
-      }
-    }
     if (newX < 0 || newX >= gridConfig.value.cols || newY < 0 || newY >= gridConfig.value.rows) {
       return { success: false, message: '位置超出字盘范围' }
+    }
+
+    if (newX !== current.x || newY !== current.y) {
+      const occupant = characters.value.find(c => c.x === newX && c.y === newY)
+      if (occupant && occupant.char !== char) {
+        return { success: false, message: '该位置已被占用' }
+      }
     }
 
     characters.value[idx] = { ...current, ...updates }
@@ -279,6 +346,10 @@ export const useCompositorStore = defineStore('compositor', () => {
 
   function togglePath() {
     showPath.value = !showPath.value
+  }
+
+  function toggleOptimizePath() {
+    optimizePath.value = !optimizePath.value
   }
 
   function saveScheme(name: string): string {
@@ -350,16 +421,20 @@ export const useCompositorStore = defineStore('compositor', () => {
     inputText,
     showHeatmap,
     showPath,
+    optimizePath,
     charMap,
     usedPositions,
     charCounts,
     missingChars,
     availableCharCounts,
     insufficientStockChars,
+    canCompletePick,
     heatmapData,
     maxHeatValue,
     pathSteps,
     totalDistance,
+    originalDistance,
+    savedDistancePercent,
     setGridConfig,
     addCharacter,
     removeCharacter,
@@ -368,6 +443,7 @@ export const useCompositorStore = defineStore('compositor', () => {
     setInputText,
     toggleHeatmap,
     togglePath,
+    toggleOptimizePath,
     saveScheme,
     loadSchemes,
     loadScheme,
