@@ -1,0 +1,181 @@
+<template>
+  <div class="scheme-manager">
+    <n-card title="方案管理" :bordered="false" size="small">
+      <n-space vertical :size="12" style="width: 100%">
+        <n-input
+          v-model:value="newSchemeName"
+          placeholder="方案名称"
+          size="small"
+        />
+        <n-space>
+          <n-button size="small" type="primary" @click="handleSave">
+            保存当前
+          </n-button>
+          <n-button size="small" @click="handleExport">
+            导出 JSON
+          </n-button>
+        </n-space>
+        <n-upload
+          :show-file-list="false"
+          :custom-request="handleImport"
+          accept=".json"
+        >
+          <n-button size="small" block>
+            导入 JSON
+          </n-button>
+        </n-upload>
+      </n-space>
+    </n-card>
+
+    <n-card title="已保存方案" :bordered="false" size="small" style="margin-top: 16px">
+      <n-scrollbar style="max-height: 300px">
+        <n-list bordered :show-divider="false" size="small">
+          <n-list-item
+            v-for="scheme in schemes"
+            :key="scheme.id"
+            class="scheme-item"
+          >
+            <div class="scheme-info">
+              <span class="scheme-name">{{ scheme.name }}</span>
+              <span class="scheme-meta">
+                {{ scheme.gridConfig.cols }}×{{ scheme.gridConfig.rows }} | 
+                {{ scheme.characters.length }} 字
+              </span>
+            </div>
+            <n-space>
+              <n-button size="tiny" text type="primary" @click="handleLoad(scheme.id)">
+                加载
+              </n-button>
+              <n-button size="tiny" text type="error" @click="handleDelete(scheme.id)">
+                删除
+              </n-button>
+            </n-space>
+          </n-list-item>
+          <n-list-item v-if="schemes.length === 0" class="empty-item">
+            暂无保存的方案
+          </n-list-item>
+        </n-list>
+      </n-scrollbar>
+    </n-card>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, onMounted } from 'vue'
+import { useCompositorStore } from '@/stores/compositor'
+import { useMessage } from 'naive-ui'
+import type { CompositorScheme } from '@/types'
+import {
+  NCard,
+  NInput,
+  NButton,
+  NSpace,
+  NList,
+  NListItem,
+  NScrollbar,
+ NUpload
+} from 'naive-ui'
+
+const store = useCompositorStore()
+const message = useMessage()
+
+const newSchemeName = ref('')
+const schemes = ref<CompositorScheme[]>([])
+
+function refreshSchemes() {
+  schemes.value = store.loadSchemes()
+}
+
+function handleSave() {
+  if (!newSchemeName.value.trim()) {
+    message.warning('请输入方案名称')
+    return
+  }
+  store.saveScheme(newSchemeName.value.trim())
+  message.success('保存成功')
+  newSchemeName.value = ''
+  refreshSchemes()
+}
+
+function handleLoad(id: string) {
+  const success = store.loadScheme(id)
+  if (success) {
+    message.success('加载成功')
+  } else {
+    message.error('加载失败')
+  }
+}
+
+function handleDelete(id: string) {
+  store.deleteScheme(id)
+  message.success('删除成功')
+  refreshSchemes()
+}
+
+function handleExport() {
+  const json = store.exportSchemeAsJson(newSchemeName.value || '字盘方案')
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${newSchemeName.value || 'type-tray'}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+  message.success('导出成功')
+}
+
+function handleImport(options: { file: File }) {
+  const file = options.file
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    const text = e.target?.result as string
+    const result = store.importSchemeFromJson(text)
+    if (result.success) {
+      message.success('导入成功')
+      refreshSchemes()
+    } else {
+      message.error(result.message || '导入失败')
+    }
+  }
+  reader.readAsText(file)
+}
+
+onMounted(() => {
+  refreshSchemes()
+})
+</script>
+
+<style scoped>
+.scheme-manager {
+  width: 320px;
+}
+
+.scheme-item {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  padding: 8px 12px !important;
+}
+
+.scheme-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scheme-name {
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.scheme-meta {
+  color: #999;
+  font-size: 12px;
+}
+
+.empty-item {
+  text-align: center;
+  color: #999;
+  justify-content: center !important;
+}
+</style>
