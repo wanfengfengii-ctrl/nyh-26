@@ -24,8 +24,11 @@
         <n-tag size="small" type="info">
           {{ currentPageData?.charCount || 0 }} 字
         </n-tag>
-        <n-tag size="small" type="warning" v-if="currentPageData?.missingCharCount">
-          {{ currentPageData?.missingCharCount }} 缺字
+        <n-tag size="small" type="warning" v-if="pageIssueCount > 0">
+          {{ pageIssueCount }} 问题
+        </n-tag>
+        <n-tag size="small" type="info" v-if="pageAnnotationCount > 0">
+          {{ pageAnnotationCount }} 批注
         </n-tag>
       </n-space>
     </div>
@@ -40,30 +43,52 @@
           v-for="(line, lineIdx) in currentPageData.lines"
           :key="lineIdx"
           class="proof-line"
-          :class="{ 'has-issue': line.issues.length > 0 }"
+          :class="getLineClass(line, lineIdx)"
           :style="lineStyle"
+          @click="handleLineClick(lineIdx)"
         >
           <span
             v-for="(char, charIdx) in line.chars"
             :key="charIdx"
             class="proof-char"
-            :class="{
-              'is-missing': char.isMissing,
-              'is-punctuation': char.isPunctuation,
-              'squeeze-before': char.squeezeBefore > 0
-            }"
+            :class="getCharClass(char, lineIdx, charIdx)"
             :style="getCharStyle(char)"
-            :title="getCharTitle(char)"
+            :title="getCharTitle(char, lineIdx, charIdx)"
+            @click.stop="handleCharClick(lineIdx, charIdx, char.char)"
           >
-            {{ char.isMissing ? '□' : char.char }}
+            <template v-if="char.isMissing">
+              <span class="missing-char-box">□</span>
+            </template>
+            <template v-else>
+              {{ char.char }}
+            </template>
+            <span
+              v-if="hasIssueOnChar(lineIdx, charIdx)"
+              class="char-issue-indicator"
+              :class="getIssueIndicatorClass(lineIdx, charIdx)"
+            ></span>
+            <span
+              v-if="hasAnnotationOnChar(lineIdx, charIdx)"
+              class="char-annotation-indicator"
+            ></span>
           </span>
-          <span
-            v-if="line.issues.length > 0"
-            class="line-issue-indicator"
-            @click="toggleLineIssues(lineIdx)"
-          >
-            ⚠
-          </span>
+
+          <div class="line-side-indicators">
+            <span
+              v-if="getLineIssues(lineIdx).length > 0"
+              class="line-issue-badge"
+              :class="getLineIssueBadgeClass(lineIdx)"
+            >
+              {{ getLineIssues(lineIdx).length }}
+            </span>
+            <span
+              v-if="getLineAnnotations(lineIdx).length > 0"
+              class="line-annotation-badge"
+              @click.stop="handleLineAnnotationClick(lineIdx)"
+            >
+              {{ getLineAnnotations(lineIdx).length }}
+            </span>
+          </div>
         </div>
       </div>
       <div v-else class="empty-preview">
@@ -73,20 +98,33 @@
 
     <div v-if="showLineIssues" class="line-issues-popup">
       <div class="popup-header">
-        <span>本行问题</span>
+        <span>本行问题（{{ currentLineIssues.length }}）</span>
         <n-button size="tiny" text @click="showLineIssues = false">✕</n-button>
       </div>
-      <n-list size="small" bordered>
-        <n-list-item
-          v-for="(issue, idx) in currentLineIssues"
-          :key="idx"
-        >
-          <n-tag :type="getIssueTagType(issue.severity)" size="small">
-            {{ getIssueTypeLabel(issue.type) }}
-          </n-tag>
-          <span class="issue-text">{{ issue.message }}</span>
-        </n-list-item>
-      </n-list>
+      <n-scrollbar style="max-height: 300px">
+        <n-list size="small" bordered>
+          <n-list-item
+            v-for="issue in currentLineIssues"
+            :key="issue.id"
+            class="popup-issue-item"
+            :class="{ selected: issue.id === selectedIssueId }"
+            @click="handleSelectIssue(issue.id)"
+          >
+            <div class="issue-row">
+              <n-tag :type="getIssueTagType(issue.severity)" size="small">
+                {{ getIssueTypeLabel(issue.type) }}
+              </n-tag>
+              <n-tag :type="getIssueStatusType(issue.status)" size="tiny">
+                {{ getIssueStatusLabel(issue.status) }}
+              </n-tag>
+            </div>
+            <div class="issue-text">{{ issue.message }}</div>
+            <div v-if="issue.resolution" class="issue-resolution">
+              {{ issue.resolution }}
+            </div>
+          </n-list-item>
+        </n-list>
+      </n-scrollbar>
     </div>
   </div>
 </template>
@@ -100,8 +138,11 @@ import {
   NTag,
   NEmpty,
   NList,
-  NListItem
+  NListItem,
+  NScrollbar
 } from 'naive-ui'
+import { useProofDecisionStore } from '@/stores/proofDecision'
+import { storeToRefs } from 'pinia'
 
 const props = defineProps<{
   pages: ProofPage[]
@@ -111,7 +152,13 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:currentPage': [page: number]
+  'char-click': [page: number, line: number, charIndex: number, char: string]
+  'line-click': [page: number, line: number]
+  'issue-select': [issueId: string]
 }>()
+
+const store = useProofDecisionStore()
+const { selectedIssueId } = storeToRefs(store)
 
 const showLineIssues = ref(false)
 const selectedLineIdx = ref(-1)
@@ -126,6 +173,14 @@ const currentPageData = computed(() => {
   return null
 })
 
+const pageIssueCount = computed(() => {
+  return store.getIssuesByPage(props.currentPage).length
+})
+
+const pageAnnotationCount = computed(() => {
+  return store.getAnnotationsByPage(props.currentPage).length
+})
+
 const pageStyle = computed(() => ({
   fontSize: props.config.fontSize + 'px',
   lineHeight: props.config.lineHeight,
@@ -138,9 +193,35 @@ const lineStyle = computed(() => ({
 
 const currentLineIssues = computed(() => {
   if (!currentPageData.value || selectedLineIdx.value < 0) return []
-  const line = currentPageData.value.lines[selectedLineIdx.value]
-  return line?.issues || []
+  return store.getIssuesByLine(props.currentPage, selectedLineIdx.value)
 })
+
+function getLineClass(line: any, lineIdx: number): Record<string, boolean> {
+  const issues = store.getIssuesByLine(props.currentPage, lineIdx)
+  const hasPending = issues.some(i => i.status === 'pending')
+  const hasResolved = issues.length > 0 && issues.every(i => i.status !== 'pending')
+  return {
+    'has-issue': issues.length > 0,
+    'has-pending': hasPending,
+    'has-resolved': hasResolved,
+    'selected-line': selectedLineIdx.value === lineIdx
+  }
+}
+
+function getCharClass(
+  char: ProofChar,
+  lineIdx: number,
+  charIdx: number
+): Record<string, boolean> {
+  const hasIssue = hasIssueOnChar(lineIdx, charIdx)
+  return {
+    'is-missing': char.isMissing,
+    'is-punctuation': char.isPunctuation,
+    'squeeze-before': char.squeezeBefore > 0,
+    'has-issue': hasIssue,
+    'is-selected': selectedLineIdx.value === lineIdx
+  }
+}
 
 function getCharStyle(char: ProofChar) {
   const base: Record<string, string> = {}
@@ -150,14 +231,68 @@ function getCharStyle(char: ProofChar) {
   return base
 }
 
-function getCharTitle(char: ProofChar): string {
+function getCharTitle(char: ProofChar, lineIdx: number, charIdx: number): string {
+  let title = ''
   if (char.isMissing) {
     const alts = char.alternatives.length > 0
       ? `\n建议替代：${char.alternatives.join('、')}`
       : ''
-    return `缺字：${char.char}${alts}`
+    title = `缺字：${char.char}${alts}`
+  } else {
+    title = char.char
   }
-  return char.char
+
+  const charIssues = store.getIssuesByChar(props.currentPage, lineIdx, charIdx)
+  if (charIssues.length > 0) {
+    title += `\n\n问题（${charIssues.length}）：`
+    charIssues.forEach((issue, i) => {
+      title += `\n${i + 1}. [${getIssueStatusLabel(issue.status)}] ${issue.message}`
+    })
+  }
+
+  const charAnns = store.getAnnotationsByChar(props.currentPage, lineIdx, charIdx)
+  if (charAnns.length > 0) {
+    title += `\n\n批注（${charAnns.length}）：`
+    charAnns.forEach((ann, i) => {
+      title += `\n${i + 1}. ${ann.author}: ${ann.content}`
+    })
+  }
+
+  return title
+}
+
+function hasIssueOnChar(lineIdx: number, charIdx: number): boolean {
+  return store.getIssuesByChar(props.currentPage, lineIdx, charIdx).length > 0
+}
+
+function hasAnnotationOnChar(lineIdx: number, charIdx: number): boolean {
+  return store.getAnnotationsByChar(props.currentPage, lineIdx, charIdx).length > 0
+}
+
+function getIssueIndicatorClass(lineIdx: number, charIdx: number): string {
+  const issues = store.getIssuesByChar(props.currentPage, lineIdx, charIdx)
+  const hasPending = issues.some(i => i.status === 'pending')
+  const hasError = issues.some(i => i.severity === 'error' && i.status === 'pending')
+  if (hasError) return 'error'
+  if (hasPending) return 'warning'
+  return 'resolved'
+}
+
+function getLineIssues(lineIdx: number): ProofIssue[] {
+  return store.getIssuesByLine(props.currentPage, lineIdx)
+}
+
+function getLineAnnotations(lineIdx: number) {
+  return store.getAnnotationsByLine(props.currentPage, lineIdx)
+}
+
+function getLineIssueBadgeClass(lineIdx: number): string {
+  const issues = getLineIssues(lineIdx)
+  const hasPending = issues.some(i => i.status === 'pending')
+  const hasError = issues.some(i => i.severity === 'error' && i.status === 'pending')
+  if (hasError) return 'error'
+  if (hasPending) return 'warning'
+  return 'resolved'
 }
 
 function getIssueTagType(severity: string): 'error' | 'warning' | 'info' {
@@ -175,7 +310,28 @@ function getIssueTypeLabel(type: string): string {
     case 'missing-char': return '缺字'
     case 'insufficient-stock': return '库存不足'
     case 'line-overflow': return '行溢出'
+    case 'abnormal-break': return '换行异常'
     default: return '其他'
+  }
+}
+
+function getIssueStatusType(status: string): 'default' | 'success' | 'warning' | 'info' | 'error' {
+  switch (status) {
+    case 'pending': return 'default'
+    case 'adopted': return 'success'
+    case 'ignored': return 'info'
+    case 'review': return 'warning'
+    default: return 'default'
+  }
+}
+
+function getIssueStatusLabel(status: string): string {
+  switch (status) {
+    case 'pending': return '待处理'
+    case 'adopted': return '已采纳'
+    case 'ignored': return '已忽略'
+    case 'review': return '待复核'
+    default: return status
   }
 }
 
@@ -191,13 +347,36 @@ function nextPage() {
   }
 }
 
-function toggleLineIssues(lineIdx: number) {
+function handleLineClick(lineIdx: number) {
+  emit('line-click', props.currentPage, lineIdx)
+
   if (selectedLineIdx.value === lineIdx && showLineIssues.value) {
     showLineIssues.value = false
   } else {
     selectedLineIdx.value = lineIdx
     showLineIssues.value = true
   }
+}
+
+function handleCharClick(lineIdx: number, charIdx: number, char: string) {
+  emit('char-click', props.currentPage, lineIdx, charIdx, char)
+  selectedLineIdx.value = lineIdx
+
+  const charIssues = store.getIssuesByChar(props.currentPage, lineIdx, charIdx)
+  if (charIssues.length > 0) {
+    store.selectIssue(charIssues[0].id)
+  } else {
+    store.selectIssue(null)
+  }
+}
+
+function handleLineAnnotationClick(lineIdx: number) {
+  selectedLineIdx.value = lineIdx
+}
+
+function handleSelectIssue(issueId: string) {
+  store.selectIssue(issueId)
+  emit('issue-select', issueId)
 }
 </script>
 
@@ -252,6 +431,7 @@ function toggleLineIssues(lineIdx: number) {
   min-width: 300px;
   font-family: "SimSun", "宋体", "Songti SC", serif;
   color: #333;
+  position: relative;
 }
 
 .proof-line {
@@ -259,22 +439,56 @@ function toggleLineIssues(lineIdx: number) {
   align-items: center;
   position: relative;
   white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s;
+  padding-right: 40px;
+}
+
+.proof-line:hover {
+  background: #f5f5f5;
+}
+
+.proof-line.selected-line {
+  background: #e6f4ff;
 }
 
 .proof-line.has-issue {
   background: #fff7e6;
 }
 
+.proof-line.has-issue:hover {
+  background: #ffefd6;
+}
+
+.proof-line.has-resolved {
+  background: #f6ffed;
+}
+
+.proof-line.has-resolved:hover {
+  background: #e6f7d6;
+}
+
 .proof-char {
   display: inline-block;
   text-align: center;
   transition: color 0.2s, background 0.2s;
+  position: relative;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.proof-char:hover {
+  background: #bae0ff;
 }
 
 .proof-char.is-missing {
   color: #d03050;
   background: #fff1f0;
   font-weight: bold;
+}
+
+.proof-char.is-missing:hover {
+  background: #ffccc7;
 }
 
 .proof-char.is-punctuation {
@@ -285,20 +499,91 @@ function toggleLineIssues(lineIdx: number) {
   position: relative;
 }
 
-.line-issue-indicator {
+.proof-char.has-issue::after {
+  content: '';
   position: absolute;
-  right: -24px;
-  top: 50%;
-  transform: translateY(-50%);
-  cursor: pointer;
-  font-size: 14px;
-  color: #faad14;
-  opacity: 0;
-  transition: opacity 0.2s;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80%;
+  height: 2px;
+  border-radius: 1px;
 }
 
-.proof-line:hover .line-issue-indicator {
-  opacity: 1;
+.missing-char-box {
+  font-weight: bold;
+}
+
+.char-issue-indicator {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.char-issue-indicator.error {
+  background: #d03050;
+}
+
+.char-issue-indicator.warning {
+  background: #faad14;
+}
+
+.char-issue-indicator.resolved {
+  background: #52c41a;
+}
+
+.char-annotation-indicator {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #1890ff;
+}
+
+.line-side-indicators {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.line-issue-badge,
+.line-annotation-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  cursor: pointer;
+}
+
+.line-issue-badge.warning {
+  background: #faad14;
+}
+
+.line-issue-badge.error {
+  background: #d03050;
+}
+
+.line-issue-badge.resolved {
+  background: #52c41a;
+}
+
+.line-annotation-badge {
+  background: #1890ff;
 }
 
 .empty-preview {
@@ -316,7 +601,7 @@ function toggleLineIssues(lineIdx: number) {
   background: #fff;
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-  width: 280px;
+  width: 300px;
   z-index: 10;
   overflow: hidden;
 }
@@ -332,9 +617,37 @@ function toggleLineIssues(lineIdx: number) {
   font-weight: 500;
 }
 
+.popup-issue-item {
+  padding: 10px 12px !important;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.popup-issue-item:hover {
+  background: #f5f5f5;
+}
+
+.popup-issue-item.selected {
+  background: #e6f4ff;
+}
+
+.issue-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
 .issue-text {
   font-size: 12px;
-  color: #666;
-  margin-left: 8px;
+  color: #333;
+  line-height: 1.5;
+}
+
+.issue-resolution {
+  font-size: 11px;
+  color: #18a058;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed #eee;
 }
 </style>

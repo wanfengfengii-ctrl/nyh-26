@@ -7,8 +7,42 @@ import type {
   ProofResult,
   MissingCharInfo,
   StockPageEstimate,
-  CharCount
+  CharCount,
+  IssueType
 } from '@/types'
+
+let issueIdCounter = 0
+
+function generateIssueId(): string {
+  return `issue-${Date.now()}-${issueIdCounter++}`
+}
+
+function createIssue(
+  type: IssueType,
+  severity: 'error' | 'warning' | 'info',
+  message: string,
+  pageIndex: number,
+  lineIndex: number,
+  charIndex?: number,
+  char?: string,
+  alternatives?: string[]
+): ProofIssue {
+  const now = Date.now()
+  return {
+    id: generateIssueId(),
+    type,
+    severity,
+    message,
+    pageIndex,
+    lineIndex,
+    charIndex,
+    char,
+    alternatives,
+    status: 'pending',
+    createdAt: now,
+    updatedAt: now
+  }
+}
 
 const START_PROHIBITION_CHARS = new Set([
   '，', '。', '、', '；', '：', '？', '！',
@@ -221,7 +255,7 @@ export function composeProof(
   let page = newPage()
 
   function pushLine() {
-    const lineIssues = analyzeLineIssues(currentLineChars, currentLine, currentPage, config)
+    const lineIssues = analyzeLineIssues(currentLineChars, currentLine, currentPage, config, maxLineWidth)
     allIssues.push(...lineIssues)
 
     const line: ProofLine = {
@@ -507,7 +541,8 @@ function analyzeLineIssues(
   chars: ProofChar[],
   lineIndex: number,
   pageIndex: number,
-  config: ProofConfig
+  config: ProofConfig,
+  maxLineWidth: number
 ): ProofIssue[] {
   const issues: ProofIssue[] = []
 
@@ -517,37 +552,52 @@ function analyzeLineIssues(
   const lastChar = chars[chars.length - 1]
 
   if (config.enableProhibition && isStartProhibition(firstChar.char)) {
-    issues.push({
-      type: 'prohibition-start',
-      severity: 'warning',
-      message: `行首禁则："${firstChar.char}" 不应出现在行首`,
+    issues.push(createIssue(
+      'prohibition-start',
+      'warning',
+      `行首禁则："${firstChar.char}" 不应出现在行首`,
+      pageIndex,
       lineIndex,
-      charIndex: 0,
-      char: firstChar.char
-    })
+      0,
+      firstChar.char
+    ))
   }
 
   if (config.enableProhibition && isEndProhibition(lastChar.char)) {
-    issues.push({
-      type: 'prohibition-end',
-      severity: 'warning',
-      message: `行尾禁则："${lastChar.char}" 不应出现在行尾`,
+    issues.push(createIssue(
+      'prohibition-end',
+      'warning',
+      `行尾禁则："${lastChar.char}" 不应出现在行尾`,
+      pageIndex,
       lineIndex,
-      charIndex: chars.length - 1,
-      char: lastChar.char
-    })
+      chars.length - 1,
+      lastChar.char
+    ))
+  }
+
+  const lineWidth = calculateLineWidth(chars, config.fontSize)
+  if (lineWidth > maxLineWidth * 1.05) {
+    issues.push(createIssue(
+      'line-overflow',
+      'warning',
+      `行溢出：该行宽度超出版面 ${Math.round((lineWidth - maxLineWidth) / config.fontSize * 100) / 100} 字`,
+      pageIndex,
+      lineIndex
+    ))
   }
 
   chars.forEach((ch, idx) => {
     if (ch.isMissing) {
-      issues.push({
-        type: 'missing-char',
-        severity: 'error',
-        message: `缺字："${ch.char}" 字盘中不存在`,
+      issues.push(createIssue(
+        'missing-char',
+        'error',
+        `缺字："${ch.char}" 字盘中不存在`,
+        pageIndex,
         lineIndex,
-        charIndex: idx,
-        char: ch.char
-      })
+        idx,
+        ch.char,
+        ch.alternatives
+      ))
     }
   })
 
@@ -630,14 +680,15 @@ function addStockInsufficientIssues(
             insufficientChars.add(pc.char)
           }
 
-          const issue: ProofIssue = {
-            type: 'insufficient-stock',
-            severity: 'error',
-            message: `库存不足："${pc.char}" 第 ${currentCount} 次使用，库存仅 ${available} 个`,
-            lineIndex: line.lineIndex,
-            charIndex: charIdx,
-            char: pc.char
-          }
+          const issue = createIssue(
+            'insufficient-stock',
+            'error',
+            `库存不足："${pc.char}" 第 ${currentCount} 次使用，库存仅 ${available} 个`,
+            page.pageIndex,
+            line.lineIndex,
+            charIdx,
+            pc.char
+          )
 
           lineInsufficientIssues.push(issue)
           allIssues.push(issue)

@@ -126,13 +126,83 @@ export interface ProofPage {
   lineCount: number
 }
 
+export type IssueType = 'prohibition-start' | 'prohibition-end' | 'missing-char' | 'insufficient-stock' | 'line-overflow' | 'abnormal-break'
+
 export interface ProofIssue {
-  type: 'prohibition-start' | 'prohibition-end' | 'missing-char' | 'insufficient-stock' | 'line-overflow'
+  id: string
+  type: IssueType
   severity: 'error' | 'warning' | 'info'
   message: string
+  pageIndex: number
   lineIndex: number
   charIndex?: number
   char?: string
+  alternatives?: string[]
+  status: 'pending' | 'adopted' | 'ignored' | 'review'
+  resolution?: string
+  resolvedChar?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export type AnnotationType = 'comment' | 'suggestion' | 'question' | 'important'
+
+export interface ProofAnnotation {
+  id: string
+  type: AnnotationType
+  content: string
+  author: string
+  pageIndex: number
+  lineIndex: number
+  charIndex?: number
+  char?: string
+  createdAt: number
+  updatedAt: number
+  resolved: boolean
+  resolution?: string
+}
+
+export type DecisionAction = 'adopt-alternative' | 'ignore' | 'mark-review' | 'custom-replace'
+
+export interface RevisionRecord {
+  id: string
+  issueId: string
+  action: DecisionAction
+  pageIndex: number
+  lineIndex: number
+  charIndex?: number
+  originalChar?: string
+  newChar?: string
+  reason: string
+  author: string
+  timestamp: number
+  version: number
+}
+
+export interface ProofVersion {
+  version: number
+  label: string
+  timestamp: number
+  description: string
+  issueCount: number
+  resolvedCount: number
+  author: string
+}
+
+export interface ProofConclusion {
+  title: string
+  generatedAt: number
+  totalIssues: number
+  resolvedIssues: number
+  pendingIssues: number
+  adoptedRevisions: number
+  ignoredIssues: number
+  reviewIssues: number
+  conclusionText: string
+  reviewer: string
+  pages: number
+  chars: number
+  missingChars: number
 }
 
 export interface MissingCharInfo {

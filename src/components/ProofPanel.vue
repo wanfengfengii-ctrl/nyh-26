@@ -3,7 +3,7 @@
     <n-card title="待印文本" :bordered="false" size="small">
       <n-input
         type="textarea"
-        :value="inputText"
+        :value="proofInputText"
         placeholder="请输入要印刷校样的文字..."
         :rows="5"
         @update:value="handleTextChange"
@@ -262,6 +262,7 @@
 import { computed, ref, watch } from 'vue'
 import type { ProofConfig, ProofResult, StockPageEstimate, CharCount } from '@/types'
 import { useCompositorStore } from '@/stores/compositor'
+import { useProofDecisionStore } from '@/stores/proofDecision'
 import { storeToRefs } from 'pinia'
 import { composeProof, exportProofAsText } from '@/utils/proofEngine'
 import { useMessage } from 'naive-ui'
@@ -277,13 +278,16 @@ import {
   NList,
   NListItem,
   NButton,
-  NProgress
+  NProgress,
+  NInput as NInputComp
 } from 'naive-ui'
 
 const store = useCompositorStore()
+const decisionStore = useProofDecisionStore()
 const message = useMessage()
 
 const { charUniqueSet, totalAvailableStockByChar } = storeToRefs(store)
+const { pendingIssues, progress } = storeToRefs(decisionStore)
 
 const proofInputText = ref('')
 
@@ -333,6 +337,7 @@ function generateProof() {
   if (!proofInputText.value || proofInputText.value.trim().length === 0) {
     proofResult.value = null
     currentPage.value = 0
+    decisionStore.resetAll()
     return
   }
 
@@ -346,11 +351,15 @@ function generateProof() {
     totalAvailableStockByChar.value
   )
 
+  if (proofResult.value) {
+    decisionStore.setIssues(proofResult.value.issues)
+  }
+
   const newTotalPages = proofResult.value.totalPages
 
   if (newTotalPages !== oldTotalPages && oldTotalPages > 0) {
-    const progress = oldCurrentPage / Math.max(1, oldTotalPages - 1)
-    currentPage.value = Math.round(progress * Math.max(0, newTotalPages - 1))
+    const pageProgress = oldCurrentPage / Math.max(1, oldTotalPages - 1)
+    currentPage.value = Math.round(pageProgress * Math.max(0, newTotalPages - 1))
   }
 
   if (currentPage.value >= newTotalPages) {
