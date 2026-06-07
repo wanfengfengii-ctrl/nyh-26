@@ -283,11 +283,12 @@ import {
 const store = useCompositorStore()
 const message = useMessage()
 
-const { inputText, charUniqueSet, totalAvailableStockByChar } = storeToRefs(store)
-const { setInputText } = store
+const { charUniqueSet, totalAvailableStockByChar } = storeToRefs(store)
+
+const proofInputText = ref('')
 
 const textCharCount = computed(() => {
-  return inputText.value.replace(/\s/g, '').length
+  return proofInputText.value.replace(/\s/g, '').length
 })
 
 const proofConfig = ref<ProofConfig>({
@@ -303,39 +304,63 @@ const proofConfig = ref<ProofConfig>({
 
 const proofResult = ref<ProofResult | null>(null)
 const currentPage = ref(0)
+
 const stockEstimate = computed<StockPageEstimate>(() => {
- return proofResult.value?.stockEstimate || {
- canCompletePages: 0,
- limitingChar: null,
- limitingCharAvailable: 0,
- limitingCharPerPage: 0,
- totalPages: 0
- };
-});
+  return proofResult.value?.stockEstimate || {
+    canCompletePages: 0,
+    limitingChar: null,
+    limitingCharAvailable: 0,
+    limitingCharPerPage: 0,
+    totalPages: 0
+  }
+})
+
 const topCharStats = computed<CharCount[]>(() => {
- if (!proofResult.value)
- return [];
- return proofResult.value.charStats.slice(0, 15);
-});
+  if (!proofResult.value) return []
+  return proofResult.value.charStats.slice(0, 15)
+})
+
 const maxFreqCount = computed(() => {
- if (!proofResult.value || proofResult.value.charStats.length === 0)
- return 1;
- return proofResult.value.charStats[0].count;
-});
-watch([inputText, proofConfig], () => {
- generateProof();
-}, { deep: true, immediate: true });
+  if (!proofResult.value || proofResult.value.charStats.length === 0) return 1
+  return proofResult.value.charStats[0].count
+})
+
+watch([proofInputText, proofConfig], () => {
+  generateProof()
+}, { deep: true })
+
 function generateProof() {
- if (!inputText.value || inputText.value.trim().length === 0) {
- proofResult.value = null;
- currentPage.value = 0;
- return;
- }
- proofResult.value = composeProof(inputText.value, proofConfig.value, charUniqueSet.value, totalAvailableStockByChar.value);
- if (currentPage.value >= proofResult.value.totalPages) {
- currentPage.value = Math.max(0, proofResult.value.totalPages - 1);
- }
+  if (!proofInputText.value || proofInputText.value.trim().length === 0) {
+    proofResult.value = null
+    currentPage.value = 0
+    return
+  }
+
+  const oldTotalPages = proofResult.value?.totalPages || 0
+  const oldCurrentPage = currentPage.value
+
+  proofResult.value = composeProof(
+    proofInputText.value,
+    proofConfig.value,
+    charUniqueSet.value,
+    totalAvailableStockByChar.value
+  )
+
+  const newTotalPages = proofResult.value.totalPages
+
+  if (newTotalPages !== oldTotalPages && oldTotalPages > 0) {
+    const progress = oldCurrentPage / Math.max(1, oldTotalPages - 1)
+    currentPage.value = Math.round(progress * Math.max(0, newTotalPages - 1))
+  }
+
+  if (currentPage.value >= newTotalPages) {
+    currentPage.value = Math.max(0, newTotalPages - 1)
+  }
+  if (currentPage.value < 0) {
+    currentPage.value = 0
+  }
 }
+
 function updateConfig(key: keyof ProofConfig, value: number | boolean | null) {
   if (value !== null) {
     (proofConfig.value as any)[key] = value
@@ -343,7 +368,7 @@ function updateConfig(key: keyof ProofConfig, value: number | boolean | null) {
 }
 
 function handleTextChange(value: string) {
-  setInputText(value)
+  proofInputText.value = value
 }
 function getIssueTagType(severity: string): 'error' | 'warning' | 'info' {
  switch (severity) {
@@ -378,20 +403,36 @@ function handleExportText() {
  message.success('校样报告已导出');
 }
 function handleCopyText() {
- if (!proofResult.value)
- return;
- const text = exportProofAsText(proofResult.value, proofConfig.value);
- navigator.clipboard.writeText(text).then(() => {
- message.success('校样文本已复制到剪贴板');
- }).catch(() => {
- message.error('复制失败');
- });
+  if (!proofResult.value) return
+  const text = exportProofAsText(proofResult.value, proofConfig.value)
+  navigator.clipboard.writeText(text).then(() => {
+    message.success('校样文本已复制到剪贴板')
+  }).catch(() => {
+    message.error('复制失败')
+  })
 }
+
+function setCurrentPage(page: number) {
+  const total = proofResult.value?.totalPages || 0
+  currentPage.value = Math.max(0, Math.min(page, Math.max(0, total - 1)))
+}
+
+function nextPage() {
+  setCurrentPage(currentPage.value + 1)
+}
+
+function prevPage() {
+  setCurrentPage(currentPage.value - 1)
+}
+
 defineExpose({
- proofConfig,
- proofResult,
- currentPage
-});
+  proofConfig,
+  proofResult,
+  currentPage,
+  setCurrentPage,
+  nextPage,
+  prevPage
+})
 </script>
 
 <style scoped>

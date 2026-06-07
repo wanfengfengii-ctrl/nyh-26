@@ -198,6 +198,7 @@ export function composeProof(
   const missingCharMap = new Map<string, { count: number; positions: { page: number; line: number; char: number }[] }>()
   const charCountMap = new Map<string, number>()
   const problemLines: { page: number; line: number; issues: ProofIssue[] }[] = []
+  const charUsageCount = new Map<string, number>()
 
   let currentPage = 0
   let currentLine = 0
@@ -404,6 +405,8 @@ export function composeProof(
     availableCharSet
   )
 
+  addStockInsufficientIssues(pages, totalStockMap, allIssues, problemLines)
+
   let totalChars = 0
   let totalMissing = 0
   pages.forEach(p => {
@@ -600,6 +603,65 @@ function calculateStockPageEstimate(
     limitingCharPerPage: Math.round(limitingPerPage * 100) / 100,
     totalPages
   }
+}
+
+function addStockInsufficientIssues(
+  pages: ProofPage[],
+  totalStockMap: Map<string, number>,
+  allIssues: ProofIssue[],
+  problemLines: { page: number; line: number; issues: ProofIssue[] }[]
+) {
+  const charRunningCount = new Map<string, number>()
+  const insufficientChars = new Set<string>()
+
+  pages.forEach(page => {
+    page.lines.forEach(line => {
+      const lineInsufficientIssues: ProofIssue[] = []
+
+      line.chars.forEach((pc, charIdx) => {
+        if (pc.isMissing || pc.char === '　' || pc.char === ' ') return
+
+        const currentCount = (charRunningCount.get(pc.char) || 0) + 1
+        charRunningCount.set(pc.char, currentCount)
+
+        const available = totalStockMap.get(pc.char) || 0
+        if (currentCount > available) {
+          if (!insufficientChars.has(pc.char)) {
+            insufficientChars.add(pc.char)
+          }
+
+          const issue: ProofIssue = {
+            type: 'insufficient-stock',
+            severity: 'error',
+            message: `库存不足："${pc.char}" 第 ${currentCount} 次使用，库存仅 ${available} 个`,
+            lineIndex: line.lineIndex,
+            charIndex: charIdx,
+            char: pc.char
+          }
+
+          lineInsufficientIssues.push(issue)
+          allIssues.push(issue)
+        }
+      })
+
+      if (lineInsufficientIssues.length > 0) {
+        line.issues.push(...lineInsufficientIssues)
+
+        const existingProblemLine = problemLines.find(
+          pl => pl.page === line.pageIndex && pl.line === line.lineIndex
+        )
+        if (!existingProblemLine) {
+          problemLines.push({
+            page: line.pageIndex,
+            line: line.lineIndex,
+            issues: line.issues
+          })
+        } else {
+          existingProblemLine.issues = line.issues
+        }
+      }
+    })
+  })
 }
 
 export function exportProofAsText(proof: ProofResult, config: ProofConfig): string {

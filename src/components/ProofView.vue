@@ -38,7 +38,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { NSpace } from 'naive-ui'
 import ProofPreview from './ProofPreview.vue'
 import ProofPanel from './ProofPanel.vue'
@@ -63,7 +63,18 @@ const proofPages = computed<ProofPage[]>(() => {
   return proofPanelRef.value?.proofResult?.pages || []
 })
 
-const currentPage = ref(0)
+const totalPages = computed(() => {
+  return proofPanelRef.value?.proofResult?.totalPages || 0
+})
+
+const currentPage = computed({
+  get: () => proofPanelRef.value?.currentPage ?? 0,
+  set: (val: number) => {
+    if (proofPanelRef.value?.setCurrentPage) {
+      proofPanelRef.value.setCurrentPage(val)
+    }
+  }
+})
 </script>
 
 <style scoped>
