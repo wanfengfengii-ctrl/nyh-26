@@ -48,7 +48,7 @@
           </div>
 
           <n-space :size="8" wrap>
-            <n-button size="small" :disabled="currentTaskStep <= 0" @click="handlePrev">
+            <n-button size="small" :disabled="currentTaskStep < 0" @click="handlePrev">
               上一步
             </n-button>
             <n-button
@@ -94,11 +94,17 @@
 
           <div class="task-list-title">
             <span>拣字步骤</span>
-            <span class="step-count">{{ currentTaskSheet.items.length }} 个取字点</span>
+            <n-space :size="8" align="center">
+              <n-radio-group v-model:value="listViewMode" size="tiny">
+                <n-radio-button value="grouped">按格位</n-radio-button>
+                <n-radio-button value="detailed">逐字</n-radio-button>
+              </n-radio-group>
+              <span class="step-count">{{ listStepCount }} 步</span>
+            </n-space>
           </div>
 
           <n-scrollbar style="max-height: 280px">
-            <n-list bordered :show-divider="true" size="small">
+            <n-list bordered :show-divider="true" size="small" v-if="listViewMode === 'grouped'">
               <n-list-item
                 v-for="item in currentTaskSheet.items"
                 :key="item.id"
@@ -119,6 +125,32 @@
                 </div>
                 <div class="item-quantity">
                   <n-tag size="small" type="info">×{{ item.quantity }}</n-tag>
+                </div>
+              </n-list-item>
+            </n-list>
+
+            <n-list bordered :show-divider="true" size="small" v-else>
+              <n-list-item
+                v-for="step in detailedSteps"
+                :key="step.key"
+                class="task-item task-item-detailed"
+                :class="{
+                  'is-picking': step.status === 'picking',
+                  'is-completed': step.status === 'completed'
+                }"
+              >
+                <div class="item-order">
+                  <n-tag size="small" :type="getItemTagType(step.status)" round>
+                    {{ step.globalIndex + 1 }}
+                  </n-tag>
+                </div>
+                <div class="item-info">
+                  <span class="item-char">{{ step.char }}</span>
+                  <span class="item-pos">({{ step.x }}, {{ step.y }})</span>
+                  <span class="item-sub">第 {{ step.localIndex + 1 }} 个</span>
+                </div>
+                <div class="item-quantity">
+                  <span class="item-id">#{{ step.groupOrder + 1 }}</span>
                 </div>
               </n-list-item>
             </n-list>
@@ -149,7 +181,9 @@ import {
   NList,
   NListItem,
   NScrollbar,
-  NSlider
+  NSlider,
+  NRadioGroup,
+  NRadioButton
 } from 'naive-ui'
 
 const store = useCompositorStore()
@@ -213,6 +247,47 @@ const statusText = computed(() => {
     case 'partial': return '部分完成'
     default: return ''
   }
+})
+
+const listViewMode = ref<'grouped' | 'detailed'>('grouped')
+
+const detailedSteps = computed(() => {
+  if (!currentTaskSheet.value) return []
+  const steps: {
+    key: string
+    char: string
+    x: number
+    y: number
+    globalIndex: number
+    localIndex: number
+    groupOrder: number
+    status: PickTaskItem['status']
+  }[] = []
+  let globalIdx = 0
+  currentTaskSheet.value.items.forEach((item) => {
+    for (let i = 0; i < item.quantity; i++) {
+      steps.push({
+        key: `${item.id}-${i}`,
+        char: item.char,
+        x: item.x,
+        y: item.y,
+        globalIndex: globalIdx,
+        localIndex: i,
+        groupOrder: item.order,
+        status: item.status
+      })
+      globalIdx++
+    }
+  })
+  return steps
+})
+
+const listStepCount = computed(() => {
+  if (!currentTaskSheet.value) return 0
+  if (listViewMode.value === 'grouped') {
+    return currentTaskSheet.value.items.length
+  }
+  return currentTaskSheet.value.totalChars
 })
 
 function getItemTagType(status: PickTaskItem['status']): 'default' | 'success' | 'info' | 'warning' | 'error' {
@@ -390,6 +465,28 @@ onUnmounted(() => {
 
 .item-quantity {
   flex-shrink: 0;
+}
+
+.task-item-detailed .item-char {
+  font-size: 15px;
+  min-width: 20px;
+}
+
+.task-item-detailed .item-info {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.item-sub {
+  font-size: 11px;
+  color: #bbb;
+}
+
+.item-id {
+  font-size: 11px;
+  color: #999;
+  font-family: monospace;
 }
 
 .speed-label {

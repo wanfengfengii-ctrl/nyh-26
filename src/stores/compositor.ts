@@ -151,7 +151,7 @@ export const useCompositorStore = defineStore('compositor', () => {
   const pathAlgorithm = ref<PathAlgorithm>('greedy-2opt')
 
   const currentTaskSheet = ref<PickTaskSheet | null>(null)
-  const currentTaskStep = ref(0)
+  const currentTaskStep = ref(-1)
   const isAnimating = ref(false)
   const animationSpeed = ref(500)
 
@@ -449,6 +449,7 @@ export const useCompositorStore = defineStore('compositor', () => {
       return { success: false, message: '副本数需大于当前数量' }
     }
 
+    const additionalNeeded = numCopies - instances.length
     const emptyPositions = findEmptyPositions(
       characters.value,
       gridConfig.value.cols,
@@ -456,53 +457,38 @@ export const useCompositorStore = defineStore('compositor', () => {
       instances[0].x,
       instances[0].y
     )
-
-    const additionalNeeded = numCopies - instances.length
     if (emptyPositions.length < additionalNeeded) {
       return { success: false, message: '空位不足，无法拆分' }
     }
 
     const totalStock = instances.reduce((sum, c) => sum + c.stock, 0)
-    const perCopy = Math.ceil(totalStock / numCopies)
+    const baseStock = Math.floor(totalStock / numCopies)
+    const remainder = totalStock % numCopies
 
     saveHistory(`拆分 ${char} 为 ${numCopies} 个副本`)
 
     const newChars: TypeChar[] = []
-    let remainingStock = totalStock - instances[0].stock
     let posIdx = 0
 
-    for (let i = 1; i < numCopies; i++) {
-      if (i < instances.length) continue
+    for (let i = 0; i < numCopies; i++) {
+      const stockForThis = baseStock + (i < remainder ? 1 : 0)
 
-      const pos = emptyPositions[posIdx++]
-      const stock = Math.min(perCopy, remainingStock)
-      if (stock <= 0) break
-
-      const newChar: TypeChar = {
-        char,
-        x: pos.x,
-        y: pos.y,
-        stock,
-        id: `${char}-${i}-${Date.now()}`
-      }
-      characters.value.push(newChar)
-      newChars.push(newChar)
-      remainingStock -= stock
-    }
-
-    if (instances.length > 0 && remainingStock !== instances[0].stock) {
-      const firstIdx = characters.value.findIndex(c => c.id === instances[0].id)
-      if (firstIdx > -1) {
-        characters.value[firstIdx].stock = totalStock - (totalStock - remainingStock - instances[0].stock) - remainingStock
-      }
-    }
-
-    const allInstances = characters.value.filter(c => c.char === char)
-    const actualTotal = allInstances.reduce((sum, c) => sum + c.stock, 0)
-    if (actualTotal !== totalStock && allInstances.length > 0) {
-      const firstIdx = characters.value.findIndex(c => c.id === allInstances[0].id)
-      if (firstIdx > -1) {
-        characters.value[firstIdx].stock += totalStock - actualTotal
+      if (i < instances.length) {
+        const idx = characters.value.findIndex(c => c.id === instances[i].id)
+        if (idx > -1) {
+          characters.value[idx].stock = stockForThis
+        }
+      } else {
+        const pos = emptyPositions[posIdx++]
+        const newChar: TypeChar = {
+          char,
+          x: pos.x,
+          y: pos.y,
+          stock: stockForThis,
+          id: `${char}-${generateId()}`
+        }
+        characters.value.push(newChar)
+        newChars.push(newChar)
       }
     }
 
@@ -555,20 +541,20 @@ export const useCompositorStore = defineStore('compositor', () => {
       name
     )
     currentTaskSheet.value = sheet
-    currentTaskStep.value = 0
+    currentTaskStep.value = -1
     return sheet
   }
 
   function clearTaskSheet() {
     currentTaskSheet.value = null
-    currentTaskStep.value = 0
+    currentTaskStep.value = -1
     isAnimating.value = false
   }
 
   function setTaskStep(step: number) {
     if (!currentTaskSheet.value) return
     const maxStep = currentTaskSheet.value.items.length
-    currentTaskStep.value = Math.max(0, Math.min(step, maxStep))
+    currentTaskStep.value = Math.max(-1, Math.min(step, maxStep))
 
     if (currentTaskSheet.value) {
       const items = currentTaskSheet.value.items
@@ -591,6 +577,8 @@ export const useCompositorStore = defineStore('compositor', () => {
       const hasShortage = currentTaskSheet.value.shortageChars.length > 0
       if (allCompleted) {
         currentTaskSheet.value.status = hasShortage ? 'partial' : 'completed'
+      } else if (currentTaskStep.value < 0) {
+        currentTaskSheet.value.status = hasShortage ? 'partial' : 'ready'
       } else {
         currentTaskSheet.value.status = 'in-progress'
       }
@@ -661,7 +649,15 @@ export const useCompositorStore = defineStore('compositor', () => {
     const parent = schemes.find(s => s.id === parentId)
     if (!parent) return null
 
-    const newVersion = (parent.version || 1) + 1
+    const allVersions = schemes.filter(
+      s => s.id === parentId || s.parentId === parentId
+    )
+    const maxVersion = allVersions.reduce(
+      (max, s) => Math.max(max, s.version || 1),
+      0
+    )
+    const newVersion = maxVersion + 1
+
     const id = Date.now().toString()
     const scheme: CompositorScheme = {
       id,

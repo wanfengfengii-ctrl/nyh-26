@@ -238,14 +238,14 @@ const multiCopyChars = computed(() => {
 })
 
 const activeTaskItem = computed(() => {
-  if (!currentTaskSheet.value || currentTaskStep.value >= currentTaskSheet.value.items.length) {
+  if (!currentTaskSheet.value || currentTaskStep.value < 0 || currentTaskStep.value >= currentTaskSheet.value.items.length) {
     return null
   }
   return currentTaskSheet.value.items[currentTaskStep.value]
 })
 
 const completedTaskItems = computed(() => {
-  if (!currentTaskSheet.value) return []
+  if (!currentTaskSheet.value || currentTaskStep.value <= 0) return []
   return currentTaskSheet.value.items.slice(0, currentTaskStep.value)
 })
 
@@ -330,10 +330,10 @@ const pathLineConfig = computed(() => {
   }
 
   const showCount = currentTaskSheet.value
-    ? Math.min(currentTaskStep.value + 1, displaySteps.value.length)
+    ? Math.max(0, currentTaskStep.value + 1)
     : displaySteps.value.length
 
-  const visibleSteps = displaySteps.value.slice(0, showCount)
+  const visibleSteps = displaySteps.value.slice(0, Math.min(showCount, displaySteps.value.length))
 
   const points: number[] = []
   visibleSteps.forEach(step => {
@@ -356,7 +356,7 @@ const pathLineConfig = computed(() => {
 
 function getStepNodeConfig(step: PathStep) {
   const isCompleted = currentTaskSheet.value
-    ? step.index < currentTaskStep.value
+    ? currentTaskStep.value >= 0 && step.index < currentTaskStep.value
     : false
   const isCurrent = currentTaskSheet.value
     ? step.index === currentTaskStep.value
@@ -398,14 +398,14 @@ const stepNodeColor = computed(() => {
 })
 
 const showAnimatedPicker = computed(() => {
-  return isAnimating.value || (currentTaskSheet.value && currentTaskStep.value > 0)
+  return isAnimating.value || (currentTaskSheet.value && currentTaskStep.value >= 0)
 })
 
 const animPosition = computed(() => {
   if (displaySteps.value.length === 0) return null
-  if (currentTaskSheet.value) {
-    const stepIdx = Math.max(0, currentTaskStep.value - 1)
-    if (stepIdx < displaySteps.value.length) {
+  if (currentTaskSheet.value && currentTaskStep.value >= 0) {
+    const stepIdx = Math.min(currentTaskStep.value, displaySteps.value.length - 1)
+    if (stepIdx >= 0 && stepIdx < displaySteps.value.length) {
       return { x: displaySteps.value[stepIdx].x, y: displaySteps.value[stepIdx].y }
     }
   }
@@ -414,9 +414,9 @@ const animPosition = computed(() => {
 
 const currentAnimChar = computed(() => {
   if (displaySteps.value.length === 0) return ''
-  if (currentTaskSheet.value) {
-    const stepIdx = Math.max(0, currentTaskStep.value - 1)
-    if (stepIdx < displaySteps.value.length) {
+  if (currentTaskSheet.value && currentTaskStep.value >= 0) {
+    const stepIdx = Math.min(currentTaskStep.value, displaySteps.value.length - 1)
+    if (stepIdx >= 0 && stepIdx < displaySteps.value.length) {
       return displaySteps.value[stepIdx].char
     }
   }
