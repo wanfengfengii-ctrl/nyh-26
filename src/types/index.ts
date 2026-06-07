@@ -89,3 +89,76 @@ export interface RerouteEvent {
   toY: number
   reason: 'stock-depleted' | 'shorter-path'
 }
+
+export interface ProofConfig {
+  cols: number
+  rows: number
+  fontSize: number
+  lineHeight: number
+  paragraphIndent: number
+  paragraphSpacing: number
+  enableProhibition: boolean
+  enablePunctuationSqueeze: boolean
+}
+
+export interface ProofChar {
+  char: string
+  isMissing: boolean
+  isPunctuation: boolean
+  squeezeBefore: number
+  squeezeAfter: number
+  alternatives: string[]
+}
+
+export interface ProofLine {
+  chars: ProofChar[]
+  lineIndex: number
+  pageIndex: number
+  issues: ProofIssue[]
+  actualWidth: number
+}
+
+export interface ProofPage {
+  pageIndex: number
+  lines: ProofLine[]
+  charCount: number
+  missingCharCount: number
+  lineCount: number
+}
+
+export interface ProofIssue {
+  type: 'prohibition-start' | 'prohibition-end' | 'missing-char' | 'insufficient-stock' | 'line-overflow'
+  severity: 'error' | 'warning' | 'info'
+  message: string
+  lineIndex: number
+  charIndex?: number
+  char?: string
+}
+
+export interface MissingCharInfo {
+  char: string
+  count: number
+  positions: { page: number; line: number; char: number }[]
+  alternatives: string[]
+}
+
+export interface StockPageEstimate {
+  canCompletePages: number
+  limitingChar: string | null
+  limitingCharAvailable: number
+  limitingCharPerPage: number
+  totalPages: number
+}
+
+export interface ProofResult {
+  pages: ProofPage[]
+  totalPages: number
+  totalChars: number
+  totalMissingChars: number
+  totalIssues: number
+  issues: ProofIssue[]
+  missingChars: MissingCharInfo[]
+  stockEstimate: StockPageEstimate
+  charStats: CharCount[]
+  problemLines: { page: number; line: number; issues: ProofIssue[] }[]
+}

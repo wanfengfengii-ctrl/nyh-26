@@ -7,6 +7,12 @@
           <h1 class="app-title">🖨️ 活字字盘布局模拟器</h1>
           <p class="app-subtitle">Movable Type Compositor - 多副本库存拣字路径规划系统</p>
         </div>
+        <div class="header-tabs">
+          <n-tabs type="line" :value="currentView" @update:value="handleViewChange" size="small">
+            <n-tab-pane name="tray" tab="📋 字盘布局" />
+            <n-tab-pane name="proof" tab="📄 印刷校样" />
+          </n-tabs>
+        </div>
         <div class="header-actions">
           <n-button size="small" :disabled="!canUndo" @click="handleUndo">
             ↶ 撤销
@@ -18,57 +24,66 @@
       </header>
 
       <main class="app-main">
-        <aside class="sidebar left-sidebar">
-          <ControlPanel />
-        </aside>
+        <template v-if="currentView === 'tray'">
+          <aside class="sidebar left-sidebar">
+            <ControlPanel />
+          </aside>
 
-        <section class="main-content">
-          <div class="tray-wrapper">
-            <TypeTray :editable="true" />
-          </div>
-          <div class="legend">
-            <n-space :size="16" wrap>
-              <div class="legend-item">
-                <span class="legend-dot path-dot"></span>
-                <span>拣字路径</span>
-              </div>
-              <div class="legend-item">
-                <span class="legend-dot heat-dot"></span>
-                <span>热力分布</span>
-              </div>
-              <div class="legend-item">
-                <span class="legend-dot multi-dot"></span>
-                <span>多副本库存</span>
-              </div>
-              <div class="legend-item">
-                <span class="legend-dot completed-dot"></span>
-                <span>已拣字</span>
-              </div>
-              <div class="legend-item">
-                <span class="legend-dot current-dot"></span>
-                <span>当前拣字点</span>
-              </div>
-            </n-space>
-          </div>
-        </section>
+          <section class="main-content">
+            <div class="tray-wrapper">
+              <TypeTray :editable="true" />
+            </div>
+            <div class="legend">
+              <n-space :size="16" wrap>
+                <div class="legend-item">
+                  <span class="legend-dot path-dot"></span>
+                  <span>拣字路径</span>
+                </div>
+                <div class="legend-item">
+                  <span class="legend-dot heat-dot"></span>
+                  <span>热力分布</span>
+                </div>
+                <div class="legend-item">
+                  <span class="legend-dot multi-dot"></span>
+                  <span>多副本库存</span>
+                </div>
+                <div class="legend-item">
+                  <span class="legend-dot completed-dot"></span>
+                  <span>已拣字</span>
+                </div>
+                <div class="legend-item">
+                  <span class="legend-dot current-dot"></span>
+                  <span>当前拣字点</span>
+                </div>
+              </n-space>
+            </div>
+          </section>
 
-        <aside class="sidebar right-sidebar">
-          <n-tabs type="line" animated>
-            <n-tab-pane name="chars" tab="字库管理">
-              <CharManager />
-            </n-tab-pane>
-            <n-tab-pane name="tasks" tab="拣字任务">
-              <PickTaskPanel />
-            </n-tab-pane>
-            <n-tab-pane name="schemes" tab="方案版本">
-              <SchemeManager />
-            </n-tab-pane>
-          </n-tabs>
-        </aside>
+          <aside class="sidebar right-sidebar">
+            <n-tabs type="line" animated>
+              <n-tab-pane name="chars" tab="字库管理">
+                <CharManager />
+              </n-tab-pane>
+              <n-tab-pane name="tasks" tab="拣字任务">
+                <PickTaskPanel />
+              </n-tab-pane>
+              <n-tab-pane name="schemes" tab="方案版本">
+                <SchemeManager />
+              </n-tab-pane>
+            </n-tabs>
+          </aside>
+        </template>
+
+        <template v-else-if="currentView === 'proof'">
+          <div class="proof-container">
+            <ProofView />
+          </div>
+        </template>
       </main>
 
       <footer class="app-footer">
-        <span>拖拽活字可调整位置 | 同一字符支持多副本库存 | 支持路径优化与任务单生成</span>
+        <span v-if="currentView === 'tray'">拖拽活字可调整位置 | 同一字符支持多副本库存 | 支持路径优化与任务单生成</span>
+        <span v-else-if="currentView === 'proof'">行列排版 · 禁则提示 · 标点挤压 · 缺字高亮 · 库存预估 · 校样导出</span>
       </footer>
     </div>
     </n-message-provider>
@@ -76,7 +91,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { darkTheme, lightTheme, NConfigProvider, NSpace, NTabs, NTabPane, NButton, NMessageProvider } from 'naive-ui'
 import { useCompositorStore } from '@/stores/compositor'
 import { storeToRefs } from 'pinia'
@@ -85,12 +100,19 @@ import ControlPanel from '@/components/ControlPanel.vue'
 import CharManager from '@/components/CharManager.vue'
 import SchemeManager from '@/components/SchemeManager.vue'
 import PickTaskPanel from '@/components/PickTaskPanel.vue'
+import ProofView from '@/components/ProofView.vue'
 
 const store = useCompositorStore()
 const { canUndo, canRedo } = storeToRefs(store)
 const { undo, redo } = store
 
+const currentView = ref<'tray' | 'proof'>('tray')
+
 const theme = computed(() => lightTheme)
+
+function handleViewChange(view: string) {
+  currentView.value = view as 'tray' | 'proof'
+}
 
 function handleUndo() {
   undo()
@@ -138,9 +160,29 @@ function handleRedo() {
   margin: 4px 0 0 0;
 }
 
+.header-tabs {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.header-tabs :deep(.n-tabs) {
+  --n-tab-text-color: rgba(255, 255, 255, 0.7);
+  --n-tab-text-color-active: #fff;
+  --n-tab-bar-color: #fff;
+  --n-tabs-border-color: transparent;
+}
+
 .header-actions {
   display: flex;
   gap: 8px;
+}
+
+.proof-container {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
 }
 
 .app-main {
