@@ -74,15 +74,19 @@
               <template #unchecked>无热力</template>
             </n-switch>
           </n-space>
-          <n-space>
-            <n-switch v-model:value="optimizePath">
-              <template #checked>路径优化</template>
-              <template #unchecked>按原文顺序</template>
-            </n-switch>
-            <n-tag v-if="optimizePath && savedDistancePercent > 0" type="success" size="small">
-              节省 {{ savedDistancePercent }}%
-            </n-tag>
-          </n-space>
+
+          <div class="algo-selector">
+            <span class="algo-label">路径算法：</span>
+            <n-radio-group v-model:value="selectedAlgo" size="small" @update:value="handleAlgoChange">
+              <n-radio value="original">原文顺序</n-radio>
+              <n-radio value="nearest-neighbor">最近邻</n-radio>
+              <n-radio value="greedy-2opt">2-opt 优化</n-radio>
+            </n-radio-group>
+          </div>
+
+          <n-tag v-if="savedDistancePercent > 0 && selectedAlgo !== 'original'" type="success" size="small">
+            相比原文节省 {{ savedDistancePercent }}%
+          </n-tag>
         </n-space>
       </n-space>
     </n-card>
@@ -90,13 +94,13 @@
     <n-card title="统计信息" :bordered="false" size="small" style="margin-top: 16px">
       <n-statistic label="总移动距离 (格)" :value="totalDistance" :precision="2">
         <template #suffix>
-          <n-tag v-if="optimizePath && savedDistancePercent > 0" type="success" size="small">
+          <n-tag v-if="selectedAlgo !== 'original'" type="success" size="small">
             优化后
           </n-tag>
         </template>
       </n-statistic>
       <n-statistic
-        v-if="optimizePath && originalDistance !== totalDistance"
+        v-if="selectedAlgo !== 'original' && originalDistance !== totalDistance"
         label="原顺序距离"
         :value="originalDistance"
         :precision="2"
@@ -116,6 +120,11 @@
           </span>
         </template>
       </n-statistic>
+      <n-statistic label="多副本字符" :value="multiCopyCharCount" style="margin-top: 8px">
+        <template #suffix>
+          <n-tag size="small" type="info">种</n-tag>
+        </template>
+      </n-statistic>
     </n-card>
 
     <n-card v-if="missingChars.length > 0" title="缺字清单" :bordered="false" size="small" type="error" style="margin-top: 16px">
@@ -131,17 +140,22 @@
       </div>
     </n-card>
 
-    <n-card v-if="insufficientStockChars.length > 0" title="库存不足" :bordered="false" size="small" type="warning" style="margin-top: 16px">
-      <div class="stock-warning">
-        <n-tag
-          v-for="c in insufficientStockChars"
-          :key="c.char"
-          type="warning"
-          style="margin: 4px"
-        >
-          {{ c.char }}: 需{{ c.needed }} / 有{{ c.available }}
-        </n-tag>
-      </div>
+    <n-card v-if="shortageInfoList.length > 0" title="库存分布与缺额" :bordered="false" size="small" type="warning" style="margin-top: 16px">
+      <n-space vertical :size="8" style="width: 100%">
+        <div v-for="info in shortageInfoList" :key="info.char" class="stock-info-item">
+          <div class="stock-info-header">
+            <span class="stock-info-char">{{ info.char }}</span>
+            <n-tag size="small" type="warning">
+              缺 {{ info.shortage }}
+            </n-tag>
+          </div>
+          <div class="stock-info-locs">
+            <n-tag size="small" v-for="loc in info.locations" :key="`${loc.x}-${loc.y}`">
+              ({{ loc.x }},{{ loc.y }}) ×{{ loc.stock }}
+            </n-tag>
+          </div>
+        </div>
+      </n-space>
     </n-card>
 
     <n-card title="字符使用频率" :bordered="false" size="small" style="margin-top: 16px">
@@ -169,9 +183,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useCompositorStore } from '@/stores/compositor'
 import { storeToRefs } from 'pinia'
+import type { PathAlgorithm } from '@/types'
 import {
   NCard,
   NFormItem,
@@ -182,7 +197,9 @@ import {
   NStatistic,
   NDivider,
   NTag,
-  NAlert
+  NAlert,
+  NRadioGroup,
+  NRadio
 } from 'naive-ui'
 
 const store = useCompositorStore()
@@ -191,18 +208,22 @@ const {
   inputText,
   showPath,
   showHeatmap,
-  optimizePath,
+  pathAlgorithm,
   missingChars,
   availableCharCounts,
   insufficientStockChars,
+  shortageInfoList,
   totalDistance,
   originalDistance,
   savedDistancePercent,
   charCounts,
-  canCompletePick
+  canCompletePick,
+  charMap
 } = storeToRefs(store)
 
-const { setGridConfig, setInputText, toggleOptimizePath } = store
+const { setGridConfig, setInputText, setPathAlgorithm } = store
+
+const selectedAlgo = ref<PathAlgorithm>(pathAlgorithm.value)
 
 const totalChars = computed(() => {
   return charCounts.value.reduce((sum, c) => sum + c.count, 0)
@@ -215,6 +236,14 @@ const availableCharsCount = computed(() => {
 const maxFreqCount = computed(() => {
   if (availableCharCounts.value.length === 0) return 1
   return availableCharCounts.value[0].count
+})
+
+const multiCopyCharCount = computed(() => {
+  let count = 0
+  charMap.value.forEach((instances) => {
+    if (instances.length > 1) count++
+  })
+  return count
 })
 
 const alertType = computed(() => {
@@ -240,6 +269,10 @@ function handleGridChange(key: 'cols' | 'rows' | 'cellSize', value: number | nul
 
 function handleTextChange(value: string) {
   setInputText(value)
+}
+
+function handleAlgoChange(value: PathAlgorithm) {
+  setPathAlgorithm(value)
 }
 </script>
 
@@ -313,5 +346,41 @@ function handleTextChange(value: string) {
 
 .text-error {
   color: #d03050;
+}
+
+.algo-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #666;
+}
+
+.algo-label {
+  flex-shrink: 0;
+}
+
+.stock-info-item {
+  padding: 8px;
+  background: #fffbe6;
+  border-radius: 4px;
+}
+
+.stock-info-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.stock-info-char {
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.stock-info-locs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 </style>

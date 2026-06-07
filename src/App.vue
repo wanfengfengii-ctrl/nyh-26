@@ -1,10 +1,19 @@
 <template>
   <n-config-provider :theme="theme">
+    <n-message-provider>
     <div class="app">
       <header class="app-header">
         <div class="header-content">
           <h1 class="app-title">🖨️ 活字字盘布局模拟器</h1>
-          <p class="app-subtitle">Movable Type Compositor - 拣字路径规划工具</p>
+          <p class="app-subtitle">Movable Type Compositor - 多副本库存拣字路径规划系统</p>
+        </div>
+        <div class="header-actions">
+          <n-button size="small" :disabled="!canUndo" @click="handleUndo">
+            ↶ 撤销
+          </n-button>
+          <n-button size="small" :disabled="!canRedo" @click="handleRedo">
+            ↷ 重做
+          </n-button>
         </div>
       </header>
 
@@ -28,8 +37,16 @@
                 <span>热力分布</span>
               </div>
               <div class="legend-item">
-                <span class="legend-dot stock-warning-dot"></span>
-                <span>库存不足</span>
+                <span class="legend-dot multi-dot"></span>
+                <span>多副本库存</span>
+              </div>
+              <div class="legend-item">
+                <span class="legend-dot completed-dot"></span>
+                <span>已拣字</span>
+              </div>
+              <div class="legend-item">
+                <span class="legend-dot current-dot"></span>
+                <span>当前拣字点</span>
               </div>
             </n-space>
           </div>
@@ -40,7 +57,10 @@
             <n-tab-pane name="chars" tab="字库管理">
               <CharManager />
             </n-tab-pane>
-            <n-tab-pane name="schemes" tab="方案管理">
+            <n-tab-pane name="tasks" tab="拣字任务">
+              <PickTaskPanel />
+            </n-tab-pane>
+            <n-tab-pane name="schemes" tab="方案版本">
               <SchemeManager />
             </n-tab-pane>
           </n-tabs>
@@ -48,21 +68,37 @@
       </main>
 
       <footer class="app-footer">
-        <span>拖拽活字可调整位置 | 同一格位仅存一种活字</span>
+        <span>拖拽活字可调整位置 | 同一字符支持多副本库存 | 支持路径优化与任务单生成</span>
       </footer>
     </div>
+    </n-message-provider>
   </n-config-provider>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { darkTheme, lightTheme, NConfigProvider, NSpace, NTabs, NTabPane } from 'naive-ui'
+import { darkTheme, lightTheme, NConfigProvider, NSpace, NTabs, NTabPane, NButton, NMessageProvider } from 'naive-ui'
+import { useCompositorStore } from '@/stores/compositor'
+import { storeToRefs } from 'pinia'
 import TypeTray from '@/components/TypeTray.vue'
 import ControlPanel from '@/components/ControlPanel.vue'
 import CharManager from '@/components/CharManager.vue'
 import SchemeManager from '@/components/SchemeManager.vue'
+import PickTaskPanel from '@/components/PickTaskPanel.vue'
+
+const store = useCompositorStore()
+const { canUndo, canRedo } = storeToRefs(store)
+const { undo, redo } = store
 
 const theme = computed(() => lightTheme)
+
+function handleUndo() {
+  undo()
+}
+
+function handleRedo() {
+  redo()
+}
 </script>
 
 <style scoped>
@@ -80,11 +116,13 @@ const theme = computed(() => lightTheme)
   padding: 16px 24px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .header-content {
   max-width: 1600px;
-  margin: 0 auto;
 }
 
 .app-title {
@@ -98,6 +136,11 @@ const theme = computed(() => lightTheme)
   font-size: 13px;
   opacity: 0.7;
   margin: 4px 0 0 0;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .app-main {
@@ -174,8 +217,18 @@ const theme = computed(() => lightTheme)
   background: linear-gradient(135deg, #fff 0%, #18a058 100%);
 }
 
-.stock-warning-dot {
-  background: #d03050;
+.multi-dot {
+  background: #18a058;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px #18a058;
+}
+
+.completed-dot {
+  background: #52c41a;
+}
+
+.current-dot {
+  background: #1890ff;
 }
 
 .app-footer {

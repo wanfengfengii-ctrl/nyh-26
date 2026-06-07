@@ -20,7 +20,7 @@
 
         <v-group
           v-for="char in characters"
-          :key="char.char"
+          :key="char.id || char.char"
           :config="{
             x: char.x * cellSize + cellSize / 2,
             y: char.y * cellSize + cellSize / 2,
@@ -35,12 +35,12 @@
               y: -cellSize / 2 + 2,
               width: cellSize - 4,
               height: cellSize - 4,
-              fill: '#ffffff',
-              stroke: '#d0d0d0',
-              strokeWidth: 1,
+              fill: getCharBgColor(char),
+              stroke: getCharStrokeColor(char),
+              strokeWidth: getCharStrokeWidth(char),
               cornerRadius: 4,
-              shadowColor: 'rgba(0,0,0,0.1)',
-              shadowBlur: 3,
+              shadowColor: getShadowColor(char),
+              shadowBlur: getShadowBlur(char),
               shadowOffsetX: 1,
               shadowOffsetY: 1,
             }"
@@ -69,6 +69,18 @@
               align: 'center',
             }"
           />
+          <v-text
+            v-if="getInstanceLabel(char)"
+            :config="{
+              text: getInstanceLabel(char) || '',
+              fontSize: 9,
+              fill: '#18a058',
+              x: cellSize / 2 - 4,
+              y: -cellSize / 2 + 8,
+              width: 20,
+              align: 'right',
+            }"
+          />
         </v-group>
 
         <v-line
@@ -78,30 +90,42 @@
 
         <v-circle
           v-if="showPath"
-          v-for="step in pathSteps"
+          v-for="step in displaySteps"
           :key="`step-${step.index}`"
-          :config="{
-            x: step.x * cellSize + cellSize / 2,
-            y: step.y * cellSize + cellSize / 2 - cellSize * 0.3,
-            radius: 10,
-            fill: stepNodeColor,
-            stroke: '#fff',
-            strokeWidth: 2,
-          }"
+          :config="getStepNodeConfig(step)"
         />
 
         <v-text
           v-if="showPath"
-          v-for="step in pathSteps"
+          v-for="step in displaySteps"
           :key="`step-num-${step.index}`"
+          :config="getStepTextConfig(step)"
+        />
+
+        <v-circle
+          v-if="showAnimatedPicker && animPosition"
           :config="{
-            x: step.x * cellSize + cellSize / 2 - 6,
-            y: step.y * cellSize + cellSize / 2 - cellSize * 0.3 - 6,
-            text: String(step.index + 1),
-            fontSize: 11,
-            fill: '#fff',
-            width: 12,
+            x: animPosition.x * cellSize + cellSize / 2,
+            y: animPosition.y * cellSize + cellSize / 2,
+            radius: cellSize * 0.35,
+            fill: 'rgba(24, 160, 88, 0.2)',
+            stroke: '#18a058',
+            strokeWidth: 2,
+            listening: false,
+          }"
+        />
+        <v-text
+          v-if="showAnimatedPicker && currentAnimChar"
+          :config="{
+            x: animPosition.x * cellSize + cellSize / 2,
+            y: animPosition.y * cellSize + cellSize / 2 - cellSize * 0.55,
+            text: currentAnimChar,
+            fontSize: cellSize * 0.4,
+            fontFamily: 'serif',
+            fill: '#18a058',
+            width: cellSize,
             align: 'center',
+            listening: false,
           }"
         />
       </v-layer>
@@ -110,10 +134,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { useCompositorStore } from '@/stores/compositor'
 import { storeToRefs } from 'pinia'
-import type { TypeChar } from '@/types'
+import type { TypeChar, PathStep } from '@/types'
 
 const props = defineProps<{
   editable?: boolean
@@ -131,8 +155,13 @@ const {
   insufficientStockChars,
   missingChars,
   canCompletePick,
-  moveCharacter
+  currentTaskSheet,
+  currentTaskStep,
+  isAnimating,
+  charMap
 } = storeToRefs(store)
+
+const { moveCharacter } = store
 
 const stageRef = ref()
 
@@ -200,22 +229,118 @@ const insufficientSet = computed(() => {
   return set
 })
 
+const multiCopyChars = computed(() => {
+  const set = new Set<string>()
+  charMap.value.forEach((instances, char) => {
+    if (instances.length > 1) set.add(char)
+  })
+  return set
+})
+
+const activeTaskItem = computed(() => {
+  if (!currentTaskSheet.value || currentTaskStep.value >= currentTaskSheet.value.items.length) {
+    return null
+  }
+  return currentTaskSheet.value.items[currentTaskStep.value]
+})
+
+const completedTaskItems = computed(() => {
+  if (!currentTaskSheet.value) return []
+  return currentTaskSheet.value.items.slice(0, currentTaskStep.value)
+})
+
+function getCharBgColor(char: TypeChar): string {
+  const posKey = `${char.x},${char.y}`
+
+  if (activeTaskItem.value && activeTaskItem.value.charInstanceId === char.id) {
+    return '#e6f7ff'
+  }
+
+  if (completedTaskItems.value.some(item => item.charInstanceId === char.id)) {
+    return '#f6ffed'
+  }
+
+  return '#ffffff'
+}
+
+function getCharStrokeColor(char: TypeChar): string {
+  if (multiCopyChars.value.has(char.char)) {
+    return '#18a058'
+  }
+  return '#d0d0d0'
+}
+
+function getCharStrokeWidth(char: TypeChar): number {
+  if (multiCopyChars.value.has(char.char)) {
+    return 2
+  }
+  return 1
+}
+
+function getShadowColor(char: TypeChar): string {
+  if (multiCopyChars.value.has(char.char)) {
+    return 'rgba(24, 160, 88, 0.3)'
+  }
+  return 'rgba(0,0,0,0.1)'
+}
+
+function getShadowBlur(char: TypeChar): number {
+  if (multiCopyChars.value.has(char.char)) {
+    return 6
+  }
+  return 3
+}
+
 function getStockColor(char: TypeChar) {
   if (insufficientSet.value.has(char.char)) {
     return '#d03050'
   }
+  if (multiCopyChars.value.has(char.char)) {
+    return '#18a058'
+  }
   return '#666'
 }
 
+function getInstanceLabel(char: TypeChar): string | null {
+  if (!multiCopyChars.value.has(char.char)) return null
+  const instances = charMap.value.get(char.char)
+  if (!instances) return null
+  const idx = instances.findIndex(i => i.id === char.id)
+  if (idx === -1) return null
+  return `#${idx + 1}`
+}
+
+const displaySteps = computed(() => {
+  if (currentTaskSheet.value && currentTaskSheet.value.items.length > 0) {
+    const steps: PathStep[] = currentTaskSheet.value.items.map((item, idx) => ({
+      char: item.char,
+      x: item.x,
+      y: item.y,
+      index: idx,
+      charInstanceId: item.charInstanceId
+    }))
+    return steps
+  }
+  return pathSteps.value
+})
+
 const pathLineConfig = computed(() => {
-  if (pathSteps.value.length <= 1) {
+  if (displaySteps.value.length <= 1) {
     return { points: [], stroke: 'transparent' }
   }
+
+  const showCount = currentTaskSheet.value
+    ? Math.min(currentTaskStep.value + 1, displaySteps.value.length)
+    : displaySteps.value.length
+
+  const visibleSteps = displaySteps.value.slice(0, showCount)
+
   const points: number[] = []
-  pathSteps.value.forEach(step => {
+  visibleSteps.forEach(step => {
     points.push(step.x * cellSize.value + cellSize.value / 2)
     points.push(step.y * cellSize.value + cellSize.value / 2)
   })
+
   const strokeColor = canCompletePick.value ? '#18a058' : '#f0a020'
   return {
     points,
@@ -229,8 +354,73 @@ const pathLineConfig = computed(() => {
   }
 })
 
+function getStepNodeConfig(step: PathStep) {
+  const isCompleted = currentTaskSheet.value
+    ? step.index < currentTaskStep.value
+    : false
+  const isCurrent = currentTaskSheet.value
+    ? step.index === currentTaskStep.value
+    : false
+
+  let fill = stepNodeColor.value
+  if (isCompleted) {
+    fill = '#52c41a'
+  } else if (isCurrent) {
+    fill = '#1890ff'
+  }
+
+  return {
+    x: step.x * cellSize.value + cellSize.value / 2,
+    y: step.y * cellSize.value + cellSize.value / 2 - cellSize.value * 0.3,
+    radius: isCurrent ? 14 : 10,
+    fill,
+    stroke: '#fff',
+    strokeWidth: 2,
+    listening: false,
+  }
+}
+
+function getStepTextConfig(step: PathStep) {
+  return {
+    x: step.x * cellSize.value + cellSize.value / 2 - 6,
+    y: step.y * cellSize.value + cellSize.value / 2 - cellSize.value * 0.3 - 6,
+    text: String(step.index + 1),
+    fontSize: 11,
+    fill: '#fff',
+    width: 12,
+    align: 'center',
+    listening: false,
+  }
+}
+
 const stepNodeColor = computed(() => {
   return canCompletePick.value ? '#18a058' : '#f0a020'
+})
+
+const showAnimatedPicker = computed(() => {
+  return isAnimating.value || (currentTaskSheet.value && currentTaskStep.value > 0)
+})
+
+const animPosition = computed(() => {
+  if (displaySteps.value.length === 0) return null
+  if (currentTaskSheet.value) {
+    const stepIdx = Math.max(0, currentTaskStep.value - 1)
+    if (stepIdx < displaySteps.value.length) {
+      return { x: displaySteps.value[stepIdx].x, y: displaySteps.value[stepIdx].y }
+    }
+  }
+  return null
+})
+
+const currentAnimChar = computed(() => {
+  if (displaySteps.value.length === 0) return ''
+  if (currentTaskSheet.value) {
+    const stepIdx = Math.max(0, currentTaskStep.value - 1)
+    if (stepIdx < displaySteps.value.length) {
+      return displaySteps.value[stepIdx].char
+    }
+  }
+  return ''
 })
 
 let dragStartChar: TypeChar | null = null
@@ -243,12 +433,12 @@ function handleDragEnd(event: any, char: TypeChar) {
   const node = event.target
   const newX = Math.round(node.x() / cellSize.value - 0.5)
   const newY = Math.round(node.y() / cellSize.value - 0.5)
-  
+
   const boundedX = Math.max(0, Math.min(cols.value - 1, newX))
   const boundedY = Math.max(0, Math.min(rows.value - 1, newY))
-  
+
   if (boundedX !== char.x || boundedY !== char.y) {
-    const result = moveCharacter.value(char.char, boundedX, boundedY)
+    const result = moveCharacter.value(char.id!, boundedX, boundedY)
     if (!result.success) {
       node.x(char.x * cellSize.value + cellSize.value / 2)
       node.y(char.y * cellSize.value + cellSize.value / 2)
@@ -257,7 +447,7 @@ function handleDragEnd(event: any, char: TypeChar) {
     node.x(char.x * cellSize.value + cellSize.value / 2)
     node.y(char.y * cellSize.value + cellSize.value / 2)
   }
-  
+
   dragStartChar = null
 }
 </script>
